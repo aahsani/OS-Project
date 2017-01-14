@@ -38,18 +38,15 @@ allocproc(void)
   char *sp;
 
   acquire(&ptable.lock);
-
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
-
   release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -72,6 +69,11 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
+
+  //added
+  p->ctime = ticks;         // start time
+  p->etime = 0;             // end time
+  p->rtime = 0;             // run time
 
   return p;
 }
@@ -221,6 +223,10 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   proc->state = ZOMBIE;
+  
+//added
+  proc->etime = ticks; 
+
   sched();
   panic("zombie exit");
 }
@@ -287,9 +293,14 @@ scheduler(void)
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
+
+
+
 
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
@@ -483,3 +494,50 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+
+
+//added
+//in tabe eyne khode wait e barnamast ba 1 tafavot. inke time haro ghabl az pak kardan bayad set konim. pas hamasho az waite khodesh copy kardim :|
+int
+wait2(int *wtime, int *rtime)
+{
+  struct proc *p;
+  int havekids, pid;
+
+  acquire(&ptable.lock);
+
+  for(;;){
+    havekids = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->parent != proc) //yani parent = null
+        continue;
+      havekids = 1;
+      if(p->state == ZOMBIE){
+
+        *wtime = p->etime - p->ctime - p->rtime;
+        *rtime = p->rtime;
+
+        pid = p->pid;
+        kfree(p->kstack);
+        p->kstack = 0;
+        freevm(p->pgdir);
+        p->state = UNUSED;
+        p->pid = 0;
+        p->parent = 0;
+        p->name[0] = 0;
+        p->killed = 0;
+        release(&ptable.lock);
+        return pid;
+      }
+    }
+
+    if(!havekids || proc->killed){
+      release(&ptable.lock);
+      return -1;
+    }
+
+    sleep(proc, &ptable.lock);  //DOC: wait-sleep
+  }
+}
+

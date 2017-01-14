@@ -24,6 +24,7 @@ int getppid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int wait2(int *wtime, int *rtime);
 
 // ulib.c
 int stat(char*, struct stat*);

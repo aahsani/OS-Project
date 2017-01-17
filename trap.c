@@ -45,20 +45,23 @@ trap(struct trapframe *tf)
       exit();
     return;
   }
-
+  
+  int counter = QUANTA-1;
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
+    if(proc) 
+    {
+      if(proc->state == RUNNING)
+	      proc->rtime++;
+    }
+    counter++;
     if(cpunum() == 0){
-      acquire(&tickslock);
-      ticks++;
-      wakeup(&ticks);
-      release(&tickslock);
-
-      //added
-      if(proc) 
-      {
-        if(proc->state == RUNNING)
-          proc->rtime++;
+      if(counter == QUANTA){ 
+	 acquire(&tickslock);
+     	 ticks++;
+	 wakeup(&ticks);
+	 release(&tickslock);
+	 counter = 0;
       }
     }
     lapiceoi();

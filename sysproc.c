@@ -114,3 +114,7 @@ sys_wait2(void)
   return wait2(wtime, rtime);
 }
 
+int sys_nice(void)
+{
+  return nice();
+}

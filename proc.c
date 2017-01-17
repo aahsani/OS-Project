@@ -7,6 +7,8 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#define NULL 0
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -47,6 +49,11 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->priority = 2;
+  //added
+  p->ctime = ticks;
+  p->rtime = 0;
+  p->etime = 0;
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -70,10 +77,6 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
-  //added
-  p->ctime = ticks;         // start time
-  p->etime = 0;             // end time
-  p->rtime = 0;             // run time
 
   return p;
 }
@@ -160,6 +163,7 @@ fork(void)
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
+  np->priority = proc->priority;
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -286,7 +290,6 @@ void
 scheduler(void)
 {
   struct proc *p;
-
   for(;;){
     // Enable interrupts on this processor.
     sti();
@@ -294,27 +297,218 @@ scheduler(void)
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
 
+    #ifdef RR
+//       printf("RR\n");
+   
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+	      if(p->state != RUNNABLE)
+	        continue;
+	      proc = p;
+	      switchuvm(p);
+	      p->state = RUNNING;
+	      swtch(&cpu->scheduler, p->context);
+	      switchkvm();
+              proc = 0;
+	}
 
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+    #else
+
+    #ifdef FRR
+//       printf("FRR\n");
+
+	struct proc *minP = NULL;
+
+        	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        	  if(p && p->state == RUNNABLE){
+			if(proc && p->ctime > proc->ctime ){
+				if(minP != NULL){
+					if( minP->ctime > p->ctime )
+						minP = p;
+				}
+				else{
+					minP = p;
+				}	
+			}
+		  }
+		}
+
+        	if (minP==NULL){
+			for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+	        	  if(p->state == RUNNABLE){
+            			if (minP!=NULL){
+			              if(p->ctime < minP->ctime)
+			                minP = p;
+            			}
+            			else
+			              minP = p;
+          		  }
+		        }	        	
+		}
+
+        	if (minP!=NULL){
+        	  p = minP;
+        	  proc = p;
+        	  switchuvm(p);
+        	  p->state = RUNNING;
+        	  swtch(&cpu->scheduler, proc->context);
+        	  switchkvm();
+        	  // Process is done running for now.
+        	  // It should have changed its p->state before coming back.
+        	   proc = 0;
+       		}
+			
+
+	
+    #else
+
+    #ifdef GRT
+
+//       printf("GRT\n");
+	struct proc *minP = NULL;
+	double min = 1000000;//max
+	double temp;
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+          if(p->state == RUNNABLE){
+		if( (ticks-p->ctime) == 0 ){
+			minP = p;
+			break;
+		}
+		else{
+			temp = (p->rtime)/(ticks-p->ctime);
+			if( temp < min ) {
+				minP = p;
+				min = temp;
+			}
+		}
+	  }	
+	}
+        
+        if (minP!=NULL){
+          p = minP;//the process with the smallest creation time
+          proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
+          swtch(&cpu->scheduler, proc->context);
+          switchkvm();
+	  min = 1000000;
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+           proc = 0;
+       }
+
+    #else
+
+    #ifdef Q3
+	
+//       printf("Q3\n");
+	int c0 = 0 , c1 = 0 , c2 = 0 ;
+	for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		if(p->priority == 2) {c2++;}
+		if(p->priority == 1) {c1++;}
+		if(p->priority == 0) {c0++;}
+	}
+	if( c2 > 0 ){
+
+		struct proc *minP = NULL;
+		double min = 1000000;//max
+		double temp;
+		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+	          if(p->state == RUNNABLE && (p->priority == 2)){
+			if( (ticks-p->ctime) == 0 ){
+				minP = p;
+				break;
+			}
+			else{
+				temp = (p->rtime)/(ticks-p->ctime);
+				if( temp < min ) {
+					minP = p;
+					min = temp;
+				}
+			}
+		  }	
+		}
+	        
+	        if (minP!=NULL){
+	          p = minP;//the process with the smallest creation time
+	          proc = p;
+	          switchuvm(p);
+	          p->state = RUNNING;
+	          swtch(&cpu->scheduler, proc->context);
+	          switchkvm();
+		  min = 1000000;
+	          // Process is done running for now.
+	          // It should have changed its p->state before coming back.
+	           proc = 0;
+	       }
 
 
 
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
-      swtch(&cpu->scheduler, p->context);
-      switchkvm();
+	}//end c2
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      proc = 0;
-    }
+	else if ( c1 > 0 ){
+
+		struct proc *minP = NULL;
+        		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        		  if(p && p->state == RUNNABLE && (p->priority == 1)){
+				if(proc && p->ctime > proc->ctime ){
+					if(minP != NULL){
+						if( minP->ctime > p->ctime ){
+							minP = p;
+						}
+					}
+					else{
+						minP = p;
+					}	
+				}
+			  }
+			}
+        		if (minP==NULL){
+				for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		        	  if(p->state == RUNNABLE && (p->priority == 1)){
+        	    			if (minP!=NULL){
+				              if(p->ctime < minP->ctime)
+				                minP = p;
+        	    			}
+        	    			else
+				              minP = p;
+        	  		  }
+			        }	        	
+			}
+	
+        		if (minP!=NULL){
+        		  p = minP;
+        		  proc = p;
+        		  switchuvm(p);
+        		  p->state = RUNNING;
+        		  swtch(&cpu->scheduler, proc->context);
+        		  switchkvm();
+        		  // Process is done running for now.
+        		  // It should have changed its p->state before coming back.
+	      	  	   proc = 0;
+       			}
+	
+	}//end c1
+
+	else if ( c0 > 0 ){
+
+		for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+		      if(p->state != RUNNABLE && (p->priority == 0))
+		        continue;
+		      proc = p;
+		      switchuvm(p);
+		      p->state = RUNNING;
+		      swtch(&cpu->scheduler, p->context);
+		      switchkvm();
+	      	        proc = 0;
+		}
+	}//end c0
+
+    #endif
+    #endif
+    #endif
+    #endif
+
     release(&ptable.lock);
 
   }
@@ -341,6 +535,43 @@ sched(void)
   if(readeflags()&FL_IF)
     panic("sched interruptible");
   intena = cpu->intena;
+
+
+#ifdef FRR
+	       	struct proc *p = NULL;
+	       	struct proc *all[NPROC];
+		  int i = 0 ,j,index = -1;
+		  for( i = 0 ; i < NPROC; i++ ){
+			all[i] = NULL;
+		  }
+		  i = 0;
+		  struct proc *key;
+		  for(p = ptable.proc ; p < &ptable.proc[NPROC] ; p++ ){
+			if( p->state == RUNNABLE || p->state == RUNNING ){ 
+			       key = p;
+			       j = i-1;
+			       while (all[j] && key && j >= 0 && all[j]->ctime > key->ctime)
+			       {
+			           all[j+1] = all[j];
+			           j = j-1;
+			       }
+			       all[j+1] = key;
+			       if(proc && proc == p) index=j+1;
+			       i++;
+			}
+		  }
+		  if(index != -1){
+		    for(i = index ; i < NPROC ; i++){
+			if(all[i] && all[i]->pid != 0 )      cprintf("< %d > ," ,all[i]->pid);  
+		    }
+		    for(i = 0 ; i < index ; i++){
+			if(all[i] && all[i]->pid != 0 )      cprintf("< %d > ," ,all[i]->pid);  
+		    }
+		    cprintf("\n---------------%d\n", index);
+		  }
+	#endif
+
+
   swtch(&proc->context, cpu->scheduler);
   cpu->intena = intena;
 }
@@ -541,3 +772,14 @@ wait2(int *wtime, int *rtime)
   }
 }
 
+
+int 
+nice(void)
+{
+	int temp = proc->priority;
+	if( temp != 0 ){
+		proc->priority = temp--;
+		return 1;
+	}
+	else	return -1;
+}
